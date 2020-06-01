@@ -13,6 +13,7 @@ from collections import defaultdict
 from io import StringIO
 
 import numpy as np
+import scipy.linalg as sla
 import pandas as pd
 import scipy.stats as stats
 
@@ -567,7 +568,7 @@ class VAR(TimeSeriesModel):
         return predictedvalues
 
     def fit(self, maxlags=None, method='ols', ic=None, trend='c',
-            verbose=False):
+            verbose=False, driver=None, cond=1e-15):
         # todo: this code is only supporting deterministic terms as exog.
         # This means that all exog-variables have lag 0. If dealing with
         # different exogs is necessary, a `lags_exog`-parameter might make
@@ -598,7 +599,11 @@ class VAR(TimeSeriesModel):
             "ctt" - constant, linear and quadratic trend
             "n", "nc" - co constant, no trend
             Note that these are prepended to the columns of the dataset.
-
+        driver : {'gelsd','gelsy','gelss',None}
+            Which lapack solver to use. 
+        cond : float
+            Relative conditioning number to use.
+ 
         Returns
         -------
         VARResults
@@ -644,17 +649,22 @@ class VAR(TimeSeriesModel):
                                 self.data.xnames[k_trend:])
         self.data.cov_names = pd.MultiIndex.from_product((self.data.xnames,
                                                           self.data.ynames))
-        return self._estimate_var(lags, trend=trend)
+        return self._estimate_var(lags, trend=trend, driver=driver, cond=cond)
 
-    def _estimate_var(self, lags, offset=0, trend='c'):
+    def _estimate_var(self, lags, offset=0, trend='c', driver=None, 
+                      cond=1e-15):
         """
         lags : int
             Lags of the endogenous variable.
-        offset : int
+        offset : int, optional
             Periods to drop from beginning-- for order selection so it's an
             apples-to-apples comparison
-        trend : {str, None}
+        trend : {str, None}, optional
             As per above
+        driver : {'gelsd','gelsy','gelss',None}
+            Which lapack solver to use. 
+        cond : float
+            Relative conditioning number to use.
         """
         # have to do this again because select_order does not call fit
         self.k_trend = k_trend = util.get_trendorder(trend)
@@ -692,7 +702,8 @@ class VAR(TimeSeriesModel):
 
         y_sample = endog[lags:]
         # Lütkepohl p75, about 5x faster than stated formula
-        params = np.linalg.lstsq(z, y_sample, rcond=1e-15)[0]
+        #switched to scipy for conditioning study
+        params = sla.lstsq(z, y_sample, cond=cond, lapack_driver=driver)[0]
         resid = y_sample - np.dot(z, params)
 
         # Unbiased estimate of covariance matrix $\Sigma_u$ of the white noise
